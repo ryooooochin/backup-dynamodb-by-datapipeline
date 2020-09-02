@@ -1,0 +1,244 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  TopicArn:
+    Type: String
+    Default: arn:aws:sns:ap-northeast-1:999999999999:XXXXX
+  DynamoDBTableName1:
+    Type: String
+    Default: 【DynamoDBテーブル名1】
+  DynamoDBTableName2:
+    Type: String
+    Default: 【DynamoDBテーブル名2】
+  DynamoDBTableName3:
+    Type: String
+    Default: 【DynamoDBテーブル名3】
+
+Resources:
+  S3BucketBackup:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 【バックアップ先S3バケット名】
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  S3BucketLog:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 【ログ出力先S3バケット名】
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  DataPipeLineDynamoDBtoS3: 
+    Type: AWS::DataPipeline::Pipeline
+    Properties: 
+      Name: ExportDynamoDBtoS3
+      Description: "Pipeline to backup DynamoDB data to S3"
+      Activate: true
+      ParameterObjects: []
+      PipelineObjects: 
+        - 
+          Id: "DefaultSchedule"
+          Name: "Every 1 day"
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "Schedule"
+            - 
+              Key: "period"
+              StringValue: "1 days"
+            - 
+              Key: "startDateTime"
+              StringValue: "2020-09-01T16:00:00"
+        - 
+          Id: "EmrClusterId"
+          Name: "DefaultEmrCluster1"
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "EmrCluster"
+            - 
+              Key: "schedule"
+              RefValue: "DefaultSchedule"
+            - 
+              Key: "coreInstanceCount"
+              StringValue: "2"
+            - 
+              Key: "coreInstanceType"
+              StringValue: "m3.xlarge"
+            - 
+              Key: "masterInstanceType"
+              StringValue: "m3.xlarge"
+            - 
+              Key: "releaseLabel"
+              StringValue: "emr-5.30.1"
+            - 
+              Key: "terminateAfter"
+              StringValue: "1 Hour"
+        - 
+          Id: "Default"
+          Name: "Default"
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "Default"
+            - 
+              Key: "schedule"
+              RefValue: "DefaultSchedule"
+            - 
+              Key: "resourceRole"
+              StringValue: "DataPipelineDefaultResourceRole"
+            - 
+              Key: "role"
+              StringValue: "DataPipelineDefaultRole"
+            - 
+              Key: "pipelineLogUri"
+              StringValue: !Join
+                             - ""
+                             - - "s3://"
+                               - !Ref S3BucketLog
+                               - "/"
+            - 
+              Key: "failureAndRerunMode"
+              StringValue: "CASCADE"
+            - 
+              Key: "scheduleType"
+              StringValue: "cron"
+        - 
+          Id: "FailAction"
+          Name: "FailAction"
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "SnsAlarm"
+            - 
+              Key: "role"
+              StringValue: "DataPipelineDefaultRole"
+            - 
+              Key: "subject"
+              StringValue: "Failed PipelineId: #{node.@pipelineId} Error: #{node.errorMessage}"
+            - 
+              Key: "message"
+              StringValue: "Error: #{node.errorStackTrace}"
+            - 
+              Key: "topicArn"
+              StringValue: !Ref TopicArn
+        - 
+          Id: !Ref DynamoDBTableName1
+          Name: !Ref DynamoDBTableName1
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "HadoopActivity"
+            - 
+              Key: "jarUri"
+              StringValue: "s3://dynamodb-dpl-ap-northeast-1/emr-ddb-storage-handler/4.11.0/emr-dynamodb-tools-4.11.0-SNAPSHOT-jar-with-dependencies.jar"
+            - 
+              Key: "runsOn"
+              RefValue: "EmrClusterId"
+            - 
+              Key: "schedule"
+              RefValue: "DefaultSchedule"
+            - 
+              Key: "argument"
+              StringValue: "org.apache.hadoop.dynamodb.tools.DynamoDBExport"
+            - 
+              Key: "argument"
+              StringValue: !Join
+                             - ""
+                             - - "s3://"
+                               - !Ref S3BucketBackup
+                               - "/"
+                               - !Ref DynamoDBTableName1
+                               - "/#{format(@scheduledStartTime,'YYYY-MM-dd-HH-mm-ss')}"
+            - 
+              Key: "argument"
+              StringValue: !Ref DynamoDBTableName1
+            - 
+              Key: "argument"
+              StringValue: "0.25"
+            - 
+              Key: "onFail"
+              RefValue: "FailAction"
+        - 
+          Id: !Ref DynamoDBTableName2
+          Name: !Ref DynamoDBTableName2
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "HadoopActivity"
+            - 
+              Key: "jarUri"
+              StringValue: "s3://dynamodb-dpl-ap-northeast-1/emr-ddb-storage-handler/4.11.0/emr-dynamodb-tools-4.11.0-SNAPSHOT-jar-with-dependencies.jar"
+            - 
+              Key: "runsOn"
+              RefValue: "EmrClusterId"
+            - 
+              Key: "schedule"
+              RefValue: "DefaultSchedule"
+            - 
+              Key: "argument"
+              StringValue: "org.apache.hadoop.dynamodb.tools.DynamoDBExport"
+            - 
+              Key: "argument"
+              StringValue: !Join
+                             - ""
+                             - - "s3://"
+                               - !Ref S3BucketBackup
+                               - "/"
+                               - !Ref DynamoDBTableName2
+                               - "/#{format(@scheduledStartTime,'YYYY-MM-dd-HH-mm-ss')}"
+            - 
+              Key: "argument"
+              StringValue: !Ref DynamoDBTableName2
+            - 
+              Key: "argument"
+              StringValue: "0.25"
+            - 
+              Key: "onFail"
+              RefValue: "FailAction"
+        - 
+          Id: !Ref DynamoDBTableName3
+          Name: !Ref DynamoDBTableName3
+          Fields: 
+            - 
+              Key: "type"
+              StringValue: "HadoopActivity"
+            - 
+              Key: "jarUri"
+              StringValue: "s3://dynamodb-dpl-ap-northeast-1/emr-ddb-storage-handler/4.11.0/emr-dynamodb-tools-4.11.0-SNAPSHOT-jar-with-dependencies.jar"
+            - 
+              Key: "runsOn"
+              RefValue: "EmrClusterId"
+            - 
+              Key: "schedule"
+              RefValue: "DefaultSchedule"
+            - 
+              Key: "argument"
+              StringValue: "org.apache.hadoop.dynamodb.tools.DynamoDBExport"
+            - 
+              Key: "argument"
+              StringValue: !Join
+                             - ""
+                             - - "s3://"
+                               - !Ref S3BucketBackup
+                               - "/"
+                               - !Ref DynamoDBTableName3
+                               - "/#{format(@scheduledStartTime,'YYYY-MM-dd-HH-mm-ss')}"
+            - 
+              Key: "argument"
+              StringValue: !Ref DynamoDBTableName3
+            - 
+              Key: "argument"
+              StringValue: "0.25"
+            - 
+              Key: "onFail"
+              RefValue: "FailAction"
